@@ -96,3 +96,13 @@ LOCK
 LOG*
 CURRENT
 MANIFEST-*
+
+# log file
+*.info
+*.weight
+*.jpg
+*.png
+*.txt
+*.orig
+*EST_2016/
+*_EDT_2016/

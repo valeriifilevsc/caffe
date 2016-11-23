@@ -60,7 +60,7 @@ layer {
   top: "conv1"
   param {
     lr_mult: 1
-    decay_mult: 1
+    decay_mult: 1.0
   }
   param {
     lr_mult: 2
@@ -115,7 +115,7 @@ layer {
   top: "conv2"
   param {
     lr_mult: 1
-    decay_mult: 1
+    decay_mult: 1.0
   }
   param {
     lr_mult: 2

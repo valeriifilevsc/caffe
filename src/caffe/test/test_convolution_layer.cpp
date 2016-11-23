@@ -322,7 +322,9 @@ TYPED_TEST(ConvolutionLayerTest, Test0DConvolution) {
       new ConvolutionLayer<Dtype>(layer_param));
   vector<int> top_shape = this->blob_bottom_->shape();
   top_shape[3] = kNumOutput;
+  EXPECT_TRUE(false) << this->blob_bottom_vec_[0]->shape_string().c_str();
   layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+  EXPECT_TRUE(false) << this->blob_bottom_vec_[0]->shape_string().c_str();
   EXPECT_EQ(top_shape, this->blob_top_->shape());
   layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
   // Check against reference convolution.
@@ -344,6 +346,7 @@ TYPED_TEST(ConvolutionLayerTest, Test0DConvolution) {
       EXPECT_NEAR(value, this->blob_top_->cpu_data()[n * dim + d], 1e-4);
     }
   }
+
 }
 
 TYPED_TEST(ConvolutionLayerTest, TestSimple3DConvolution) {

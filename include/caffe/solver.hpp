@@ -114,10 +114,10 @@ class Solver {
   int current_step_;
   shared_ptr<Net<Dtype> > net_;
   vector<shared_ptr<Net<Dtype> > > test_nets_;
+  Dtype total_regularization_term_;
   vector<Callback*> callbacks_;
   vector<Dtype> losses_;
   Dtype smoothed_loss_;
-
   // The root solver that holds root nets (actually containing shared layers)
   // in data parallelism
   const Solver* const root_solver_;

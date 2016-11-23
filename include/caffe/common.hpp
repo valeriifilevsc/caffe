@@ -69,6 +69,8 @@ private:\
 // is executed we will see a fatal log.
 #define NOT_IMPLEMENTED LOG(FATAL) << "Not Implemented Yet"
 
+#define ZEROUT_THRESHOLD 0.0001
+
 // See PR #1236
 namespace cv { class Mat; }
 
@@ -133,8 +135,39 @@ class Caffe {
   }
 #ifndef CPU_ONLY
   inline static cublasHandle_t cublas_handle() { return Get().cublas_handle_; }
+  inline static cusparseHandle_t cusparse_handle() { return Get().cusparse_handle_; }
+  inline static cusparseMatDescr_t cusparse_matdescr() { return Get().cusparse_matdescr_; }
   inline static curandGenerator_t curand_generator() {
     return Get().curand_generator_;
+  }
+  inline static void cusparse_initialize_matsescr(){
+	  if(Get().cusparse_matdescr_){
+		  cusparseSetMatType(Get().cusparse_matdescr_,CUSPARSE_MATRIX_TYPE_GENERAL);
+	  	  cusparseSetMatIndexBase(Get().cusparse_matdescr_,CUSPARSE_INDEX_BASE_ZERO);
+	  }
+  }
+  //inline static cudaDeviceProp master_device_properties() { return Get().master_device_properties_; }
+  inline static int get_threads_per_block() {
+	  cudaDeviceProp prop;
+	  int device;
+	  if (cudaSuccess != cudaGetDevice(&device)) {
+		LOG(FATAL)<<"No cuda device present.";
+	    return CAFFE_CUDA_NUM_THREADS;
+	  }
+	  CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+	  return prop.maxThreadsPerBlock;
+  }
+
+  //inline static cudaDeviceProp master_device_properties() { return Get().master_device_properties_; }
+  inline static int get_shared_mem_bytes_per_block() {
+	  cudaDeviceProp prop;
+	  int device;
+	  if (cudaSuccess != cudaGetDevice(&device)) {
+	    LOG(FATAL)<<"No cuda device present.";
+	    return 0;
+	  }
+	  CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+	  return prop.sharedMemPerBlock;
   }
 #endif
 
@@ -167,7 +200,10 @@ class Caffe {
  protected:
 #ifndef CPU_ONLY
   cublasHandle_t cublas_handle_;
+  cusparseHandle_t cusparse_handle_;
+  cusparseMatDescr_t cusparse_matdescr_;
   curandGenerator_t curand_generator_;
+  //cudaDeviceProp master_device_properties_;
 #endif
   shared_ptr<RNG> random_generator_;
 

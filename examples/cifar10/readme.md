@@ -1,97 +1,135 @@
 ---
-title: CIFAR-10 tutorial
+title: CIFAR-10 experiments of SSL
 category: example
 description: Train and test Caffe on CIFAR-10 data.
 include_in_docs: true
 priority: 5
 ---
 
-Alex's CIFAR-10 tutorial, Caffe style
-=====================================
+# Experiments on CIFAR-10
+## ConvNets
+### Baseline
+1. `cifar10_full_train_test.prototxt`: the network prototxt. Dropout on `ip1` is added.
+2. `cifar10_full_multistep_solver.prototxt` is the corresponding solver.
 
-Alex Krizhevsky's [cuda-convnet](https://code.google.com/p/cuda-convnet/) details the model definitions, parameters, and training procedure for good performance on CIFAR-10. This example reproduces his results in Caffe.
+### SSL to learn high row-sparsity and column-sparsity
+1. `cifar10_full_train_test_kernel_shape.prototxt`: the network prototxt enabling group lasso regularization on each row/filter (by setting `breadth_decay_mult`) and each column/FilterShape (by setting `kernel_shape_decay_mult`)
+2. Because we need to explore the hyperparameter space (of weight decays, learning rate, etc.), we ease the exploration by [train_script.sh](/examples/cifar10/train_script.sh), whose arguments are hyperparameters we have interest in:
+```
+./examples/cifar10/train_script.sh \
+<base_lr> \ # base learning rate
+<weight_decay> \ # traditional weight decay coefficient [L2|L1 is specified in template solver prototxt]
+<kernel_shape_decay >\ # group Lasso decay coefficient on columns. DEPRECATED in CPU mode (fill 0.0 here) and use block_group_decay instead
+<breadth_decay> \ # group Lasso decay coefficient on rows. DEPRECATED in CPU mode (fill 0.0 here) and use block_group_decay instead
+<block_group_decay> \ # group Lasso decay coefficient on sub-blocks tiled in the weight matrix
+<device_id> \ # GPU device ID, -1 for CPU
+<template_solver.prototxt> \ # the template solver prototxt including all other hyper-parameters. The path is relative to examples/cifar10/
+[finetuned.caffemodel/.solverstate] # optional, the .caffemodel to be fine-tuned or the .solverstate to recover training process. The path is relative to examples/cifar10/
+```
 
-We will assume that you have Caffe successfully compiled. If not, please refer to the [Installation page](/installation.html). In this tutorial, we will assume that your caffe installation is located at `CAFFE_ROOT`.
+An example to start SSL training:
+```
+cd $CAFFE_ROOT
+./examples/cifar10/train_script.sh 0.001 0.0 0.003 0.003 0.0 0 \
+template_group_solver.prototxt \
+yourbaseline.caffemodel
+```
+`template_group_solver.prototxt` is a template solver whose net is `cifar10_full_train_test_kernel_shape.prototxt`. 
 
-We thank @chyojn for the pull request that defined the model schemas and solver configurations.
+The output and snapshot will be stored in folder named `examples/cifar10/<HYPERPARAMETER_LIST_DATE>` (e.g. `examples/cifar10/0.001_0.0_0.003_0.003_0.0_Fri_Aug_26_14-40-34_PDT_2016` ). Optionally, you can configure the `file_prefix` in `train_script.sh` to change the name of snapshotted models.
 
-*This example is a work-in-progress. It would be nice to further explain details of the network and training choices and benchmark the full training.*
+`train_script.sh` will generate `examples/cifar10/<HYPERPARAMETER_LIST_DATE>/solver.prototxt` based on input arguments, and the log info will be outputed into file `examples/cifar10/<HYPERPARAMETER_LIST_DATE>/train.info`
 
-Prepare the Dataset
--------------------
 
-You will first need to download and convert the data format from the [CIFAR-10 website](http://www.cs.toronto.edu/~kriz/cifar.html). To do this, simply run the following commands:
+### Finetune the model regularized by SSL
+Similar to SSL training, but use different network prototxt and solver template.
 
-    cd $CAFFE_ROOT
-    ./data/cifar10/get_cifar10.sh
-    ./examples/cifar10/create_cifar10.sh
+**Step 1.** Write a network prototxt, which can freeze the compact structure learned by SSL, e.g. [cifar10_full_train_test_ft.prototxt](/examples/cifar10/cifar10_full_train_test_ft.prototxt#L41):
+```
+  connectivity_mode: DISCONNECTED_GRPWISE # disconnect connections that belong to all-zero rows or columns
+```
+You can also use `connectivity_mode: DISCONNECTED_ELTWISE` to freeze all weights whose values are zeros.
 
-If it complains that `wget` or `gunzip` are not installed, you need to install them respectively. After running the script there should be the dataset, `./cifar10-leveldb`, and the data set image mean `./mean.binaryproto`.
+ **Step 2.** Launch `train_script.sh` to start fine-tuning
+```
+cd $CAFFE_ROOT
+./examples/cifar10/train_script.sh 0.0001 0.004 0.0 0.0 0.0 0 \
+template_finetune_solver.prototxt \
+yourSSL.caffemodel
+```
 
-The Model
----------
+## ResNets
+The process is similar. 
+### Some tools
+**Tool 1.** ResNets generator - a python tool to generate prototxt for ResNets. Please find it [in our repo](/examples/resnet_generator.py).
+```
+cd $CAFFE_ROOT
+# --n: number of groups, please refer to the https://arxiv.org/abs/1512.03385
+# --net_template: network template specifying the data layer
+# --connectivity_mode: 0 - CONNECTED; 1 - DISCONNECTED_ELTWISE; 2 - DISCONNECTED_GRPWISE
+# --no-learndepth: DO NOT use SSL to learn the depth of resnets
+# --learndepth: DO use SSL to learn the depth of resnets
+python examples/resnet_generator.py \
+--n 3 \
+--net_template examples/cifar10/resnet_template.prototxt \
+--connectivity_mode 0 \
+--no-learndepth
+```
+The usage of `connectivity_mode` is explained in [caffe.proto](/src/caffe/proto/caffe.proto#L362).
+Generated prototxt is `cifar10_resnet_n3.prototxt`
 
-The CIFAR-10 model is a CNN that composes layers of convolution, pooling, rectified linear unit (ReLU) nonlinearities, and local contrast normalization with a linear classifier on top of it all. We have defined the model in the `CAFFE_ROOT/examples/cifar10` directory's `cifar10_quick_train_test.prototxt`.
+**Tool 2.** Data augmentation (Padding cifar10 images)
 
-Training and Testing the "Quick" Model
---------------------------------------
+Configure [PAD](/examples/cifar10/create_padded_cifar10.sh#L7) and run `create_padded_cifar10.sh`. Note `create_padded_cifar10.sh` will remove `cifar10_train_lmdb` and `cifar10_train_lmdb`, but you can run `create_cifar10.sh` to generate them again.
 
-Training the model is simple after you have written the network definition protobuf and solver protobuf files (refer to [MNIST Tutorial](../examples/mnist.html)). Simply run `train_quick.sh`, or the following command directly:
+### Train, SSL regularize and fine-tune ResNets
+** Step 1.** Train ResNets baseline 
+```
+cd $CAFFE_ROOT
+./examples/cifar10/train_script.sh 0.1 0.0001 0.0 0.0 0.0 0 \
+template_resnet_solver.prototxt 
+```
+** Step 2.** Regularize the depth of ResNets baseline 
 
-    cd $CAFFE_ROOT
-    ./examples/cifar10/train_quick.sh
+Create or generate a network prototxt (e.g. `cifar10_resnet_n3_depth.prototxt`), where group lasso regularizations are enforced  on the convolutional layers between each pair of shortcut endpoints, 
+```
+cd $CAFFE_ROOT
+python examples/resnet_generator.py \
+--n 3 \
+--net_template examples/cifar10/resnet_template.prototxt \
+--connectivity_mode 0 \
+--learndepth
+mv examples/cifar10/cifar10_resnet_n3.prototxt examples/cifar10/cifar10_resnet_n3_depth.prototxt
+```
+then
+```
+cd $CAFFE_ROOT
+./examples/cifar10/train_script.sh 0.1 0.0001 0.0 0.0 0.007 0 \
+template_resnet_depth_solver.prototxt \
+yourResNetsBaseline.caffemodel
+```
+** Step 3.** Finetune depth-regularized ResNets
 
-`train_quick.sh` is a simple script, so have a look inside. The main tool for training is `caffe` with the `train` action, and the solver protobuf text file as its argument.
+Create or generate a network prototxt similar to `cifar10_resnet_n3_ft.prototxt` by setting `connectivity_mode: DISCONNECTED_GRPWISE`, 
+```
+cd $CAFFE_ROOT
+python examples/resnet_generator.py \
+--n 3 \
+--net_template examples/cifar10/resnet_template.prototxt \
+--connectivity_mode 2 \
+--no-learndepth
+mv examples/cifar10/cifar10_resnet_n3.prototxt examples/cifar10/cifar10_resnet_n3_ft.prototxt
+```
 
-When you run the code, you will see a lot of messages flying by like this:
+then
+```
+cd $CAFFE_ROOT
+./examples/cifar10/train_script.sh 0.01 0.0001 0.0 0.0 0.0 0 \
+template_resnet_finetune_solver.prototxt \
+your-depth-Regularized-ResNets.caffemodel
+```
 
-    I0317 21:52:48.945710 2008298256 net.cpp:74] Creating Layer conv1
-    I0317 21:52:48.945716 2008298256 net.cpp:84] conv1 <- data
-    I0317 21:52:48.945725 2008298256 net.cpp:110] conv1 -> conv1
-    I0317 21:52:49.298691 2008298256 net.cpp:125] Top shape: 100 32 32 32 (3276800)
-    I0317 21:52:49.298719 2008298256 net.cpp:151] conv1 needs backward computation.
+## Notes
+1. Please explore the hyperparameters of weight decays (by group lasso regularizations) to make the trade-off between accuracy and sparsity. Examples above are good start points.
+2. Ignore the huge "Total regularization terms". This is because the internal parameters of Scale layer of Batch Normalization layer are summed.
 
-These messages tell you the details about each layer, its connections and its output shape, which may be helpful in debugging. After the initialization, the training will start:
-
-    I0317 21:52:49.309370 2008298256 net.cpp:166] Network initialization done.
-    I0317 21:52:49.309376 2008298256 net.cpp:167] Memory required for Data 23790808
-    I0317 21:52:49.309422 2008298256 solver.cpp:36] Solver scaffolding done.
-    I0317 21:52:49.309447 2008298256 solver.cpp:47] Solving CIFAR10_quick_train
-
-Based on the solver setting, we will print the training loss function every 100 iterations, and test the network every 500 iterations. You will see messages like this:
-
-    I0317 21:53:12.179772 2008298256 solver.cpp:208] Iteration 100, lr = 0.001
-    I0317 21:53:12.185698 2008298256 solver.cpp:65] Iteration 100, loss = 1.73643
-    ...
-    I0317 21:54:41.150030 2008298256 solver.cpp:87] Iteration 500, Testing net
-    I0317 21:54:47.129461 2008298256 solver.cpp:114] Test score #0: 0.5504
-    I0317 21:54:47.129500 2008298256 solver.cpp:114] Test score #1: 1.27805
-
-For each training iteration, `lr` is the learning rate of that iteration, and `loss` is the training function. For the output of the testing phase, **score 0 is the accuracy**, and **score 1 is the testing loss function**.
-
-And after making yourself a cup of coffee, you are done!
-
-    I0317 22:12:19.666914 2008298256 solver.cpp:87] Iteration 5000, Testing net
-    I0317 22:12:25.580330 2008298256 solver.cpp:114] Test score #0: 0.7533
-    I0317 22:12:25.580379 2008298256 solver.cpp:114] Test score #1: 0.739837
-    I0317 22:12:25.587262 2008298256 solver.cpp:130] Snapshotting to cifar10_quick_iter_5000
-    I0317 22:12:25.590215 2008298256 solver.cpp:137] Snapshotting solver state to cifar10_quick_iter_5000.solverstate
-    I0317 22:12:25.592813 2008298256 solver.cpp:81] Optimization Done.
-
-Our model achieved ~75% test accuracy. The model parameters are stored in binary protobuf format in
-
-    cifar10_quick_iter_5000
-
-which is ready-to-deploy in CPU or GPU mode! Refer to the `CAFFE_ROOT/examples/cifar10/cifar10_quick.prototxt` for the deployment model definition that can be called on new data.
-
-Why train on a GPU?
--------------------
-
-CIFAR-10, while still small, has enough data to make GPU training attractive.
-
-To compare CPU vs. GPU training speed, simply change one line in all the `cifar*solver.prototxt`:
-
-    # solver mode: CPU or GPU
-    solver_mode: CPU
-
-and you will be using CPU for training.

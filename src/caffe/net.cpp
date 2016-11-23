@@ -18,6 +18,8 @@
 #include "caffe/util/upgrade_proto.hpp"
 
 #include "caffe/test/test_caffe_main.hpp"
+#include "caffe/util/benchmark.hpp"
+#include "caffe/util/io.hpp"
 
 namespace caffe {
 
@@ -47,6 +49,7 @@ Net<Dtype>::Net(const string& param_file, Phase phase,
 
 template <typename Dtype>
 void Net<Dtype>::Init(const NetParameter& in_param) {
+  total_time_ = 0;
   CHECK(Caffe::root_solver() || root_net_)
       << "root_net_ needs to be set for all non-root solvers";
   // Set phase from the state.
@@ -461,6 +464,7 @@ void Net<Dtype>::AppendParam(const NetParameter& param, const int layer_id,
   }
   const int net_param_id = params_.size();
   params_.push_back(layers_[layer_id]->blobs()[param_id]);
+
   param_id_vecs_[layer_id].push_back(net_param_id);
   param_layer_indices_.push_back(make_pair(layer_id, param_id));
   ParamSpec default_param_spec;
@@ -480,8 +484,47 @@ void Net<Dtype>::AppendParam(const NetParameter& param, const int layer_id,
     learnable_param_ids_.push_back(learnable_param_id);
     has_params_lr_.push_back(param_spec->has_lr_mult());
     has_params_decay_.push_back(param_spec->has_decay_mult());
+    has_params_individual_weight_decay_.push_back(param_spec->has_decay_proto());
+    has_params_breadth_decay_.push_back(param_spec->has_breadth_decay_mult());
+    has_params_regularization_type_.push_back(param_spec->has_regularization_type());
+    has_params_kernel_shape_decay_.push_back(param_spec->has_kernel_shape_decay_mult());
+    has_params_block_group_lasso_.push_back(param_spec->block_group_lasso_size());
     params_lr_.push_back(param_spec->lr_mult());
     params_weight_decay_.push_back(param_spec->decay_mult());
+    //read, parse and convert decay blob
+    if( IfFileExists(param_spec->decay_proto()) ){
+    	BlobProto blob_proto;
+    	CHECK( ReadProtoFromBinaryFile(param_spec->decay_proto().c_str(), &blob_proto) );
+    	shared_ptr< Blob<Dtype> >decay_blob (new Blob<Dtype> ());
+    	//Blob<Dtype> * decay_blob = new Blob<Dtype> ();
+    	decay_blob->FromProto(blob_proto);
+    	//params_individual_weight_decay_.push_back(decay_blob.get());
+    	params_individual_weight_decay_.push_back(decay_blob);
+    	CHECK_EQ(learnable_params_.back()->shape_string(),params_individual_weight_decay_.back()->shape_string());
+    	LOG(INFO)<<"Copying weight decay blob  "
+    			<< params_individual_weight_decay_.back()->shape_string()
+    			<< " from " << param_spec->decay_proto();
+//    	LOG(INFO) << params_individual_weight_decay_.size();
+    }else if (param_spec->decay_proto()==""){
+    	params_individual_weight_decay_.push_back( shared_ptr<Blob<Dtype> >() );//NULL
+    }else{
+    	LOG(FATAL) << "File does not exist: "<< param_spec->decay_proto();
+    }
+
+    params_breadth_decay_.push_back(param_spec->breadth_decay_mult());
+    params_regularization_type_.push_back(param_spec->regularization_type());
+    params_kernel_shape_decay_.push_back(param_spec->kernel_shape_decay_mult());
+    vector<BlockGroupLassoSpec> block_spec;
+    for(int i=0;i<param_spec->block_group_lasso_size();i++){
+    	block_spec.push_back(param_spec->block_group_lasso(i));
+    }
+    params_block_group_lasso_.push_back(block_spec);
+    if(layer_param.has_convolution_param()){
+		  param_groups_.push_back(layer_param.convolution_param().group());
+	}
+	else {
+	  param_groups_.push_back(1);
+	}
   } else {
     // Named param blob with name we've seen before: share params
     const int owner_net_param_id = param_names_index_[param_name];
@@ -537,6 +580,55 @@ void Net<Dtype>::AppendParam(const NetParameter& param, const int layer_id,
         params_weight_decay_[learnable_param_id] = param_spec->decay_mult();
       }
     }
+
+    /// NOT_IMPLEMENTED: has_params_individual_weight_decay_
+    /// NOT_IMPLEMENTED: params_individual_weight_decay_
+    if (param_spec->has_decay_proto()) {
+    	NOT_IMPLEMENTED;
+    }
+
+    if (param_spec->has_breadth_decay_mult()) {
+	  if (has_params_breadth_decay_[learnable_param_id]) {
+		CHECK_EQ(param_spec->breadth_decay_mult(),
+				params_breadth_decay_[learnable_param_id])
+			<< "Shared param '" << param_name << "' has mismatched breadth_decay_mult.";
+	  } else {
+		  has_params_breadth_decay_[learnable_param_id] = true;
+		  params_breadth_decay_[learnable_param_id] = param_spec->breadth_decay_mult();
+	  }
+	}
+    if (param_spec->has_regularization_type()) {
+	  if (has_params_regularization_type_[learnable_param_id]) {
+		CHECK_EQ(param_spec->regularization_type(),
+				params_regularization_type_[learnable_param_id])
+			<< "Shared param '" << param_name << "' has mismatched regularization_type.";
+	  } else {
+		  has_params_regularization_type_[learnable_param_id] = true;
+		  params_regularization_type_[learnable_param_id] = param_spec->regularization_type();
+	  }
+	}
+    if (param_spec->has_kernel_shape_decay_mult()) {
+	  if (has_params_kernel_shape_decay_[learnable_param_id]) {
+		CHECK_EQ(param_spec->kernel_shape_decay_mult(),
+				params_kernel_shape_decay_[learnable_param_id])
+			<< "Shared param '" << param_name << "' has mismatched kernel_shape_decay_mult.";
+	  } else {
+		  has_params_kernel_shape_decay_[learnable_param_id] = true;
+		  params_kernel_shape_decay_[learnable_param_id] = param_spec->kernel_shape_decay_mult();
+	  }
+	}
+    if (param_spec->block_group_lasso_size()) {
+	  if (has_params_block_group_lasso_[learnable_param_id]) {
+		LOG(FATAL) << "duplicate block_group_lasso among shared params.";
+	  } else {
+		  has_params_block_group_lasso_[learnable_param_id] = true;
+	      vector<BlockGroupLassoSpec> block_spec;
+		  for(int i=0;i<param_spec->block_group_lasso_size();i++){
+			  block_spec.push_back(param_spec->block_group_lasso(i));
+		  }
+		  params_block_group_lasso_[learnable_param_id] = block_spec;
+	  }
+	}
   }
 }
 
@@ -545,13 +637,50 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
   CHECK_GE(start, 0);
   CHECK_LT(end, layers_.size());
   Dtype loss = 0;
+  //Timer timer;
+  //double cur_time_total = 0;
   for (int i = start; i <= end; ++i) {
-    // LOG(ERROR) << "Forwarding " << layer_names_[i];
+	//nvtxRangePushA(layer_names_[i].c_str());
+	//PUSH_RANGE(layer_names_[i].c_str(),i);
+    //timer.Start();
+//	if(layers_[i]->layer_param().type()=="Pooling"){
+//		cudaProfilerStart();
+//	}
     Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
+//    if(layers_[i]->layer_param().type()=="Pooling"){
+//    	cudaProfilerStop();
+//    }
+    //timer.Stop();
+    //nvtxRangePop();
+    //POP_RANGE;
+    //cur_time_total += timer.MicroSeconds();
+    //LOG(INFO) << "Forwarding " << layer_names_[i] << "\t("<<timer.MicroSeconds()<<" us)";
+    //layers_[i]->SetTestTime( layers_[i]->GetTestTime() + timer.MicroSeconds() );
     loss += layer_loss;
     if (debug_info_) { ForwardDebugInfo(i); }
   }
+  //LOG(INFO) << "Total time in this iteration: " << "\t("<<cur_time_total<<" us)";
+  //total_time_ += cur_time_total;
   return loss;
+}
+
+
+template <typename Dtype>
+void Net<Dtype>::PrintTestTime(){
+	double total = GetTotalTime();
+	for (int i = 0; i <=layers_.size() - 1; ++i) {
+	    LOG(INFO) << " Test time of " << layer_names_[i]
+	              << "\t"<< (layers_[i]->GetTestTime()/1000)<< " ms ( "<< (100*layers_[i]->GetTestTime()/total) <<" % )";
+	}
+}
+
+template <typename Dtype>
+double Net<Dtype>::GetTotalTime(){
+	double total = 0;
+	for (int i = 0; i <=layers_.size() - 1; ++i) {
+		total += layers_[i]->GetTestTime();
+	}
+	return total;
 }
 
 template <typename Dtype>
@@ -588,6 +717,11 @@ const vector<Blob<Dtype>*>& Net<Dtype>::Forward(
 
 template <typename Dtype>
 void Net<Dtype>::BackwardFromTo(int start, int end) {
+  if(Caffe::mode()==Caffe::CPU){
+#ifdef USE_MKL
+	  LOG(FATAL) << "MKL has precision problem?!";
+#endif
+  }
   CHECK_GE(end, 0);
   CHECK_LT(start, layers_.size());
   for (int i = start; i >= end; --i) {
@@ -781,6 +915,8 @@ void Net<Dtype>::CopyTrainedLayersFrom(const NetParameter& param) {
       const bool kReshape = false;
       target_blobs[j]->FromProto(source_layer.blobs(j), kReshape);
     }
+    //LOG(INFO) << "Aligning Weights";
+    layers_[target_layer_id]->WeightAlign();
   }
 }
 
@@ -925,6 +1061,7 @@ template <typename Dtype>
 void Net<Dtype>::Update() {
   for (int i = 0; i < learnable_params_.size(); ++i) {
     learnable_params_[i]->Update();
+    learnable_params_[i]->Zerout();
   }
 }
 

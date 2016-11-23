@@ -2,7 +2,9 @@
 
 #include <string>
 #include <vector>
-
+#ifndef CPU_ONLY
+#include <cuda_profiler_api.h>
+#endif
 #include "caffe/solver.hpp"
 #include "caffe/util/format.hpp"
 #include "caffe/util/hdf5.hpp"
@@ -61,6 +63,7 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   }
   iter_ = 0;
   current_step_ = 0;
+  total_regularization_term_ = 0;
 }
 
 template <typename Dtype>
@@ -252,6 +255,14 @@ void Solver<Dtype>::Step(int iters) {
     }
     ApplyUpdate();
 
+    if(display){
+    	//display the info of regularization
+    	LOG(INFO) << "    Total regularization terms: "
+    	              << total_regularization_term_ << " "
+    	              <<"loss+regular. : "
+    	              << total_regularization_term_+smoothed_loss_;
+
+    }
     // Increment the internal iter_ counter -- its value should always indicate
     // the number of times the weights have been updated.
     ++iter_;

@@ -98,7 +98,7 @@ message NetParameter {
 // NOTE
 // Update the next available ID when you add a new SolverParameter field.
 //
-// SolverParameter next available ID: 41 (last added: type)
+// SolverParameter next available ID: 44 (last added: block_group_decay)
 message SolverParameter {
   //////////////////////////////////////////////////////////////////////////////
   // Specifying the train and test networks
@@ -227,6 +227,10 @@ message SolverParameter {
 
   // If false, don't save a snapshot after training finishes.
   optional bool snapshot_after_train = 28 [default = true];
+  
+  optional float breadth_decay = 41 [default = 0.0]; // The group weight decay on each kernel.
+  optional float kernel_shape_decay = 42 [default = 0.0]; // The group weight decay on all elemements having the same coordinate in each kernel
+  optional float block_group_decay = 43 [default = 0.0]; // The group weight decay on all elemements each block
 
   // DEPRECATED: old solver enum types, use string instead
   enum SolverType {
@@ -301,6 +305,30 @@ message ParamSpec {
 
   // The multiplier on the global weight decay for this parameter.
   optional float decay_mult = 4 [default = 1.0];
+  
+  //The multiplier on the global group lasso weight decay for this parameter.
+  optional float breadth_decay_mult = 5 [default = 0.0];
+  optional float kernel_shape_decay_mult = 6 [default = 0.0];
+  
+  repeated BlockGroupLassoSpec block_group_lasso = 7;
+  
+  // To specify local regularization type ("L1"/"L2") 
+  optional string regularization_type = 8 [default = ""];
+  
+  // The binary proto file specifying the local weight decay multipliers for individual weights. 
+  optional string decay_proto = 9 [default = ""];
+}
+
+// Specifies shape and decay multiplier of a block, on which group lasso regularization is enforced.
+message BlockGroupLassoSpec {
+  // the size of the block along x-dimension (i.e. along row of a matrix)
+  optional uint32 xdimen = 1 [default = 1]; 
+  
+  // the size of the block along y-dimension (i.e. along column of a matrix)
+  optional uint32 ydimen = 2 [default = 1]; 
+  
+  // loca decay multiplier of group lasso regularization on this block
+  optional float block_decay_mult = 3 [default = 1.0];
 }
 
 // NOTE
@@ -337,6 +365,15 @@ message LayerParameter {
   // The size must be either 0 or equal to the number of bottoms.
   repeated bool propagate_down = 11;
 
+  // Specifies how to deal with connections whose weights are recovered/initialized as zeros. 
+  // Used for fine-tuning
+  enum ConnectivityMode {
+    CONNECTED = 0;  //keep connected
+    DISCONNECTED_ELTWISE = 1; //disconnect all zero-weight connections
+    DISCONNECTED_GRPWISE = 2; //disconnect connections lying in all-zero rows and all-zero columns 
+  }
+  optional ConnectivityMode connectivity_mode = 12 [default = CONNECTED];
+  
   // Rules controlling whether and when a layer is included in the network,
   // based on the current NetState.  You may specify a non-zero number of rules
   // to include OR exclude, but not both.  If no include or exclude rules are
@@ -597,6 +634,8 @@ message ConvolutionParameter {
     CUDNN = 2;
   }
   optional Engine engine = 15 [default = DEFAULT];
+  //repeated uint32 forward_channels = 19; // the name of each bottom blob
+  //repeated uint32 forward_outputs = 20; // the name of each top blob
 
   // The axis to interpret as "channels" when performing convolution.
   // Preceding dimensions are treated as independent inputs;
@@ -615,6 +654,16 @@ message ConvolutionParameter {
   // implementation; for input blobs with num_axes != 2, this option is
   // ignored and the ND implementation will be used.)
   optional bool force_nd_im2col = 17 [default = false];
+  
+  // the method of convolutional computation
+  enum ConvMode {
+    LOWERED_GEMM = 0;   //gemm on lowered tensors
+    LOWERED_CSRMM = 1;  //sparse weight matrix in CSR format * lowered feature maps
+    LOWERED_CCNMM = 2;  //removing all-zero rows & columns and ConCateNating remaining ones, then do gemm. GPU mode is implemented with partial CPU subroutines :(. 
+    DIRECT_SCONV = 3;  //direct convolution on tensors without lowering, harnessing sparsity. More in intel branch
+    DIRECT_DCONV = 4;  //direct convolution on tensors without lowering, dense format. More in intel branch
+  }
+  optional ConvMode conv_mode = 21 [default = LOWERED_GEMM];
 }
 
 message CropParameter {

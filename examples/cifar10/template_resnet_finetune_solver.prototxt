@@ -1,0 +1,38 @@
+# The train/test net protocol buffer definition
+net: "examples/cifar10/cifar10_resnet_n3_ft.prototxt"
+
+# test_iter specifies how many forward passes the test should carry out.
+# In the case of CIFAR10, we have test batch size 100 and 100 test iterations,
+# covering the full 10,000 testing images.
+test_iter: 100
+
+# Carry out testing every 1000 training iterations.
+test_interval: 1000
+
+# The base learning rate, momentum and the weight decay of the network.
+# base_lr: 0.1
+momentum: 0.9
+
+# kernel_shape_decay: 0.0005
+# breadth_decay: 0.0005
+# weight_decay: 0.0001
+regularization_type: "L2"
+
+# The learning rate policy
+lr_policy: "multistep"
+gamma: 0.1
+
+# Adjust stepvalue according to convergence
+stepvalue: 32000
+stepvalue: 64000
+max_iter: 96000
+
+# Display every 200 iterations
+display: 200
+
+# snapshot intermediate results
+snapshot: 8000
+#snapshot_prefix: "examples/cifar10/cifar10_full_grouplasso"
+
+# solver mode: CPU or GPU
+# solver_mode: GPU

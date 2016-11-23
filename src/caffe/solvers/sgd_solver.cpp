@@ -104,12 +104,63 @@ void SGDSolver<Dtype>::ApplyUpdate() {
   Dtype rate = GetLearningRate();
   if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
     LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
+
+    //display sparsity
+	//const vector<float>& net_params_weight_decay =
+	//	  this->net_->params_weight_decay();
+	//Dtype weight_decay = this->param_.weight_decay();
+	ostringstream sparsity_msg_stream;
+	sparsity_msg_stream << "    Element Sparsity %: \n";
+	for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
+		//Dtype local_decay = weight_decay * net_params_weight_decay[param_id];
+		sparsity_msg_stream << GetSparsity(param_id) <<"\t";
+		//if(local_decay) sparsity_msg_stream << GetSparsity(param_id) <<"\t";
+		//else sparsity_msg_stream << -1 <<"\t";
+	}
+	LOG(INFO) << sparsity_msg_stream.str();
+
+	sparsity_msg_stream.str("");
+	sparsity_msg_stream << "     Column Sparsity %: \n";
+	for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
+		//Dtype local_decay = this->param_.kernel_shape_decay() * this->net_->params_kernel_shape_decay()[param_id];
+		sparsity_msg_stream << GetGroupSparsity(param_id, true) <<"\t";
+		//if(local_decay) sparsity_msg_stream << GetGroupSparsity(param_id, true) <<"\t";
+		//else sparsity_msg_stream << -1 <<"\t";
+	}
+	LOG(INFO) << sparsity_msg_stream.str();
+
+	sparsity_msg_stream.str("");
+	sparsity_msg_stream << "        Row Sparsity %: \n";
+	for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
+		sparsity_msg_stream << GetGroupSparsity(param_id, false) <<"\t";
+		//if(local_decay) sparsity_msg_stream << GetGroupSparsity(param_id, false) <<"\t";
+		//else sparsity_msg_stream << -1 <<"\t";
+	}
+	LOG(INFO) << sparsity_msg_stream.str();
+
+	sparsity_msg_stream.str("");
+	sparsity_msg_stream << "      Block Sparsity %: \n";
+	for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
+		const vector<BlockGroupLassoSpec> net_params_block_group_lasso =
+							 this->net_->params_block_group_lasso()[param_id];
+		for (int blk_idx=0;blk_idx<net_params_block_group_lasso.size();blk_idx++){
+			int xdimen = net_params_block_group_lasso[blk_idx].xdimen();
+			int ydimen = net_params_block_group_lasso[blk_idx].ydimen();
+			sparsity_msg_stream << "("<<xdimen<<","<<ydimen<<"):"<<GetGroupSparsity(param_id, ydimen, xdimen) <<";";
+		}
+		sparsity_msg_stream << "\t";
+	}
+	LOG(INFO) << sparsity_msg_stream.str();
+
   }
+
   ClipGradients();
+  Solver<Dtype>::total_regularization_term_ = Dtype(0);
   for (int param_id = 0; param_id < this->net_->learnable_params().size();
        ++param_id) {
     Normalize(param_id);
-    Regularize(param_id);
+    Solver<Dtype>::total_regularization_term_ += Regularize(param_id);
+    Solver<Dtype>::total_regularization_term_ += GroupLassoRegularize(param_id);
     ComputeUpdateValue(param_id, rate);
   }
   this->net_->Update();
@@ -142,30 +193,89 @@ void SGDSolver<Dtype>::Normalize(int param_id) {
 }
 
 template <typename Dtype>
-void SGDSolver<Dtype>::Regularize(int param_id) {
+Dtype SGDSolver<Dtype>::Regularize(int param_id) {
   const vector<Blob<Dtype>*>& net_params = this->net_->learnable_params();
   const vector<float>& net_params_weight_decay =
       this->net_->params_weight_decay();
+  const vector<string>& net_params_local_regular_types = this->net_->params_regularization_type();
   Dtype weight_decay = this->param_.weight_decay();
   string regularization_type = this->param_.regularization_type();
+  string local_regularization_type = net_params_local_regular_types[param_id];
+  const vector<  shared_ptr<Blob<Dtype> >  >& params_individual_decays = this->net_->params_individual_weight_decay();
+  if(!local_regularization_type.empty()){
+	  regularization_type = local_regularization_type;
+  }
   Dtype local_decay = weight_decay * net_params_weight_decay[param_id];
+  Dtype regularization_term = Dtype(0);
+  if(params_individual_decays[param_id]){
+	  CHECK_EQ(net_params[param_id]->count(), params_individual_decays[param_id]->count());
+  }
+//  for (int i=0;i<params_individual_decays.size();i++){
+//	  LOG(INFO)<<i<<" " <<params_individual_decays[i];
+//	  if(params_individual_decays[i]){
+//		  LOG(INFO)<<params_individual_decays[i]->count();
+//	  }
+//  }
   switch (Caffe::mode()) {
   case Caffe::CPU: {
     if (local_decay) {
       if (regularization_type == "L2") {
-        // add weight decay
-        caffe_axpy(net_params[param_id]->count(),
-            local_decay,
-            net_params[param_id]->cpu_data(),
-            net_params[param_id]->mutable_cpu_diff());
+    	  if(params_individual_decays[param_id]){
+    		    caffe_mul(net_params[param_id]->count(),
+    				  net_params[param_id]->cpu_data(),
+    				  params_individual_decays[param_id]->cpu_data(),
+    				  temp_[param_id]->mutable_cpu_data()
+    				  );
+    		  	// add weight decay
+				caffe_axpy(net_params[param_id]->count(),
+					local_decay,
+					temp_[param_id]->cpu_data(),
+					net_params[param_id]->mutable_cpu_diff());
+				//calcuate the l2 regularization term
+				regularization_term = caffe_cpu_dot(
+						net_params[param_id]->count(),
+						temp_[param_id]->cpu_data(),
+						net_params[param_id]->cpu_data());
+    	  }else{
+			// add weight decay
+			caffe_axpy(net_params[param_id]->count(),
+				local_decay,
+				net_params[param_id]->cpu_data(),
+				net_params[param_id]->mutable_cpu_diff());
+			//calcuate the l2 regularization term
+			regularization_term = caffe_cpu_dot(
+					net_params[param_id]->count(),
+					net_params[param_id]->cpu_data(),
+					net_params[param_id]->cpu_data());
+    	  }
+		regularization_term *= local_decay/(Dtype)2.0;
       } else if (regularization_type == "L1") {
         caffe_cpu_sign(net_params[param_id]->count(),
             net_params[param_id]->cpu_data(),
             temp_[param_id]->mutable_cpu_data());
+        if(params_individual_decays[param_id]){
+        	caffe_mul(net_params[param_id]->count(),
+        		  temp_[param_id]->cpu_data(),
+				  params_individual_decays[param_id]->cpu_data(),
+				  temp_[param_id]->mutable_cpu_data()
+				);
+        }
         caffe_axpy(net_params[param_id]->count(),
             local_decay,
             temp_[param_id]->cpu_data(),
             net_params[param_id]->mutable_cpu_diff());
+        //calcuate the l1 regularization term
+        if(params_individual_decays[param_id]){
+        	caffe_mul(net_params[param_id]->count(),
+				  net_params[param_id]->cpu_data(),
+				  params_individual_decays[param_id]->cpu_data(),
+				  temp_[param_id]->mutable_cpu_data()
+				);
+        	regularization_term = caffe_cpu_asum(net_params[param_id]->count(),temp_[param_id]->cpu_data());
+        } else {
+        	regularization_term = caffe_cpu_asum(net_params[param_id]->count(),net_params[param_id]->cpu_data());
+        }
+		regularization_term *= local_decay;
       } else {
         LOG(FATAL) << "Unknown regularization type: " << regularization_type;
       }
@@ -176,19 +286,57 @@ void SGDSolver<Dtype>::Regularize(int param_id) {
 #ifndef CPU_ONLY
     if (local_decay) {
       if (regularization_type == "L2") {
-        // add weight decay
-        caffe_gpu_axpy(net_params[param_id]->count(),
-            local_decay,
-            net_params[param_id]->gpu_data(),
-            net_params[param_id]->mutable_gpu_diff());
+    	  if(params_individual_decays[param_id]){
+    		  //gradient:  w*lamda_w
+    		  caffe_copy(net_params[param_id]->count(),
+    				  net_params[param_id]->gpu_data(),
+    				  temp_[param_id]->mutable_gpu_data());
+    		  caffe_gpu_eltwise_multi(net_params[param_id]->count(),
+    				  params_individual_decays[param_id]->gpu_data(),
+    				  temp_[param_id]->mutable_gpu_data());
+    		  caffe_gpu_axpy(net_params[param_id]->count(),
+    		  				local_decay,
+    		  				temp_[param_id]->gpu_data(),
+    		  				net_params[param_id]->mutable_gpu_diff());
+    		  //term: 0.5*w*w*lamda_w
+    		  caffe_gpu_dot(net_params[param_id]->count(),
+    				  net_params[param_id]->gpu_data(),
+    				  temp_[param_id]->gpu_data(),
+    				  &regularization_term);
+    	  }else{
+			// add weight decay
+			caffe_gpu_axpy(net_params[param_id]->count(),
+				local_decay,
+				net_params[param_id]->gpu_data(),
+				net_params[param_id]->mutable_gpu_diff());
+			//calcuate the l2 regularization term
+			caffe_gpu_dot(net_params[param_id]->count(),net_params[param_id]->gpu_data(),net_params[param_id]->gpu_data(),&regularization_term);
+    	}
+    	regularization_term *= local_decay/(Dtype)2.0;
       } else if (regularization_type == "L1") {
         caffe_gpu_sign(net_params[param_id]->count(),
             net_params[param_id]->gpu_data(),
             temp_[param_id]->mutable_gpu_data());
+        if(params_individual_decays[param_id]){
+        	//gradient: sign(w)*lamda_w
+        	caffe_gpu_eltwise_multi(net_params[param_id]->count(),
+			  params_individual_decays[param_id]->gpu_data(),
+			  temp_[param_id]->mutable_gpu_data());
+        }
         caffe_gpu_axpy(net_params[param_id]->count(),
             local_decay,
             temp_[param_id]->gpu_data(),
             net_params[param_id]->mutable_gpu_diff());
+        //calcuate the l1 regularization term
+        if(params_individual_decays[param_id]){
+        	caffe_gpu_eltwise_multi(net_params[param_id]->count(),
+        			  net_params[param_id]->gpu_data(),
+					  temp_[param_id]->mutable_gpu_data());
+        	caffe_gpu_asum(net_params[param_id]->count(),temp_[param_id]->gpu_data(),&regularization_term);
+        }else{
+        	caffe_gpu_asum(net_params[param_id]->count(),net_params[param_id]->gpu_data(),&regularization_term);
+        }
+		regularization_term *= local_decay;
       } else {
         LOG(FATAL) << "Unknown regularization type: " << regularization_type;
       }
@@ -201,6 +349,240 @@ void SGDSolver<Dtype>::Regularize(int param_id) {
   default:
     LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
   }
+  return regularization_term;
+}
+
+template <typename Dtype>
+Dtype SGDSolver<Dtype>::GetSparsity(int param_id) {
+  const vector<Blob<Dtype>*>& net_params = this->net_->learnable_params();
+  Dtype sparsity = Dtype(0);
+  switch (Caffe::mode()) {
+  case Caffe::CPU: {
+        caffe_cpu_if_zerout(net_params[param_id]->count(),
+            net_params[param_id]->cpu_data(),
+            temp_[param_id]->mutable_cpu_data());
+        //calcuate the sparsity
+        sparsity = caffe_cpu_asum(net_params[param_id]->count(),temp_[param_id]->cpu_data())*Dtype(100)/net_params[param_id]->count();
+        break;
+  }
+  case Caffe::GPU: {
+#ifndef CPU_ONLY
+
+        caffe_gpu_if_zerout(net_params[param_id]->count(),
+            net_params[param_id]->gpu_data(),
+            temp_[param_id]->mutable_gpu_data());
+        caffe_gpu_asum(net_params[param_id]->count(),temp_[param_id]->gpu_data(),&sparsity);
+        sparsity = sparsity*Dtype(100)/net_params[param_id]->count();
+#else
+    NO_GPU;
+#endif
+    	break;
+  }
+  default:
+    LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+  }
+  return sparsity;
+}
+
+template <typename Dtype>
+Dtype SGDSolver<Dtype>::GetGroupSparsity(int param_id, bool dimen) {
+  const vector<Blob<Dtype>*>& net_params = this->net_->learnable_params();
+  return 100*caffe_cpu_group_sparsity(net_params[param_id]->shape(0),
+		  net_params[param_id]->count()/net_params[param_id]->shape(0),
+		  net_params[param_id]->cpu_data(),
+		  dimen
+		  );
+}
+
+template <typename Dtype>
+Dtype SGDSolver<Dtype>::GetGroupSparsity(int param_id, int ydimen,int xdimen) {
+  const vector<Blob<Dtype>*>& net_params = this->net_->learnable_params();
+  int equivalent_ch = net_params[param_id]->count()/net_params[param_id]->shape(0);
+  CHECK_EQ(net_params[param_id]->shape(0)%ydimen,0);
+  CHECK_EQ(equivalent_ch%xdimen,0);
+  int block_num_x = equivalent_ch/xdimen;
+  int block_num_y = net_params[param_id]->shape(0)/ydimen;
+  int count = 0;
+  for(int by=0;by<block_num_y;by++){
+	  for(int bx=0;bx<block_num_x;bx++){
+		  count++;
+		  bool inner_break = false;
+		  for(int y=0;y<ydimen;y++){
+			  if(inner_break) break;
+		  	  for(int x=0;x<xdimen;x++){
+		  		  int idx = (by*ydimen+y)*equivalent_ch + (bx*xdimen+x);
+		  		  if(net_params[param_id]->cpu_data()[idx]){
+		  			  count--;
+		  			  inner_break = true;
+		  			  break;
+		  		  }
+		      }
+		  }
+	  }
+  }
+  return (Dtype)(100*count)/(Dtype)(block_num_x*block_num_y);
+}
+
+template <typename Dtype>
+Dtype SGDSolver<Dtype>::GroupLassoRegularize(int param_id) {
+  const vector<Blob<Dtype>*>& net_params = this->net_->learnable_params();
+  const vector<int >& net_param_groups = this->net_->param_groups();
+  const vector<float>& net_params_breadth_decay_multi =
+  	             this->net_->params_breadth_decay();
+  const vector<float>& net_params_kernel_shape_decay_multi =
+  	             this->net_->params_kernel_shape_decay();
+  const vector<BlockGroupLassoSpec> net_params_block_group_lasso =
+    	             this->net_->params_block_group_lasso()[param_id];
+  Dtype local_breadth_decay = this->param_.breadth_decay() * net_params_breadth_decay_multi[param_id];
+  Dtype local_kernel_shape_decay = this->param_.kernel_shape_decay() * net_params_kernel_shape_decay_multi[param_id];
+  Dtype regularization_term = Dtype(0);
+  bool if_learn_kernel_shape = local_kernel_shape_decay!=0;// && (net_params[param_id]->num_axes()==4);
+  bool if_learn_breadth = local_breadth_decay!=0;// && (net_params[param_id]->num_axes()==4 );
+  int equivalent_ch = net_params[param_id]->count()/net_params[param_id]->shape(0);
+  switch (Caffe::mode()) {
+  case Caffe::CPU: {
+
+	if(if_learn_breadth || if_learn_kernel_shape){
+		LOG(FATAL)<< "Deprecated in CPU mode: breadth and kernel shape decay (use block group decay instead)";
+	}
+
+	for (int blk_idx=0;blk_idx<net_params_block_group_lasso.size();blk_idx++){
+		int xdimen = net_params_block_group_lasso[blk_idx].xdimen();
+		int ydimen = net_params_block_group_lasso[blk_idx].ydimen();
+		Dtype block_decay_mult = net_params_block_group_lasso[blk_idx].block_decay_mult();
+		Dtype local_block_group_decay = block_decay_mult*this->param_.block_group_decay();
+		if(local_block_group_decay){
+			caffe_cpu_block_group_lasso(
+					net_params[param_id]->shape(0),
+					equivalent_ch,
+					ydimen, xdimen,
+					net_params[param_id]->cpu_data(),
+					temp_[param_id]->mutable_cpu_data());
+			Dtype term;
+			term = caffe_cpu_asum(temp_[param_id]->count(),temp_[param_id]->cpu_data());
+			term /= (xdimen*ydimen);
+			regularization_term += term*local_block_group_decay;
+
+			caffe_div_checkzero(net_params[param_id]->count(),
+				  net_params[param_id]->cpu_data(),
+				  temp_[param_id]->cpu_data(),
+				  temp_[param_id]->mutable_cpu_data());
+		    caffe_axpy(net_params[param_id]->count(),
+				  local_block_group_decay,
+				  temp_[param_id]->cpu_data(),
+				  net_params[param_id]->mutable_cpu_diff());
+		}
+	}
+
+	/*
+    if (if_learn_kernel_shape) {
+      if((net_params[param_id]->shape(2)>1) || (net_params[param_id]->shape(3)>1) || net_param_groups[param_id]>1){
+    	  LOG(FATAL)<< "Unsupported in CPU mode: group lasso for convolutional layers with kernel > 1x1 or with more than 1 kernel bank";
+      }
+
+      for(int c=0;c<net_params[param_id]->shape(1);c++){
+    	  Dtype tmp = caffe_cpu_strided_dot(net_params[param_id]->shape(0),
+    			  net_params[param_id]->cpu_data()+c,net_params[param_id]->shape(1),
+    			  net_params[param_id]->cpu_data()+c,net_params[param_id]->shape(1));
+		  tmp = sqrt(tmp);
+		  regularization_term += tmp;
+		  temp_[param_id]->mutable_cpu_data()[c] = tmp;
+      }
+      regularization_term *= local_breadth_decay;
+      //copy memory
+      for(int num=1;num<net_params[param_id]->shape(0);num++){
+    	  memcpy(temp_[param_id]->mutable_cpu_data()+num*net_params[param_id]->shape(1),
+    			  temp_[param_id]->cpu_data(),
+    			  net_params[param_id]->shape(1)*sizeof(Dtype));
+      }
+      caffe_div_checkzero(net_params[param_id]->count(),
+    		  net_params[param_id]->cpu_data(),
+    		  temp_[param_id]->cpu_data(),
+    		  temp_[param_id]->mutable_cpu_data());
+      caffe_axpy(net_params[param_id]->count(),
+    		  	  local_breadth_decay,
+    		  	  temp_[param_id]->cpu_data(),
+                  net_params[param_id]->mutable_cpu_diff());
+    }
+    */
+    break;
+  }
+  case Caffe::GPU: {
+#ifndef CPU_ONLY
+	//group lasso along columns (channels)
+    if (if_learn_kernel_shape) {
+    	int group_size = net_params[param_id]->shape(0)/net_param_groups[param_id];//number of kernels in each group
+    	for (int g=0;g<net_param_groups[param_id];g++){
+    		int offset = g*group_size*equivalent_ch;
+    		caffe_gpu_bar_group_lasso(group_size,
+					equivalent_ch,
+					net_params[param_id]->gpu_data()+offset,
+					temp_[param_id]->mutable_gpu_data()+offset, true);//get the denominator of each w
+			Dtype term;
+			caffe_gpu_asum(equivalent_ch,temp_[param_id]->gpu_data()+offset,&term);
+			regularization_term += term*local_kernel_shape_decay;
+    	}
+    	caffe_gpu_div_checkzero(net_params[param_id]->count(), net_params[param_id]->gpu_data(), temp_[param_id]->gpu_data(), temp_[param_id]->mutable_gpu_data());
+		caffe_gpu_axpy(net_params[param_id]->count(),
+					local_kernel_shape_decay,
+					temp_[param_id]->gpu_data(),
+					net_params[param_id]->mutable_gpu_diff());
+    }
+
+    //group lasso along rows (kernels)
+    if (if_learn_breadth) {
+		int group_size = net_params[param_id]->shape(0)/net_param_groups[param_id];//number of kernels in each group
+		for (int g=0;g<net_param_groups[param_id];g++){
+			int offset = g*group_size*equivalent_ch;
+			caffe_gpu_bar_group_lasso(group_size,
+					equivalent_ch,
+					net_params[param_id]->gpu_data()+offset,
+					temp_[param_id]->mutable_gpu_data()+offset, false);//get the denominator of each w
+			Dtype term;
+			caffe_gpu_asum(group_size,temp_[param_id]->gpu_data()+offset,&term,equivalent_ch);
+			regularization_term += term*local_breadth_decay;
+		}
+		caffe_gpu_div_checkzero(net_params[param_id]->count(), net_params[param_id]->gpu_data(), temp_[param_id]->gpu_data(), temp_[param_id]->mutable_gpu_data());
+		caffe_gpu_axpy(net_params[param_id]->count(),
+					local_breadth_decay,
+					temp_[param_id]->gpu_data(),
+					net_params[param_id]->mutable_gpu_diff());
+	}
+
+    for (int blk_idx=0;blk_idx<net_params_block_group_lasso.size();blk_idx++){
+    	int xdimen = net_params_block_group_lasso[blk_idx].xdimen();
+    	int ydimen = net_params_block_group_lasso[blk_idx].ydimen();
+    	Dtype block_decay_mult = net_params_block_group_lasso[blk_idx].block_decay_mult();
+    	Dtype local_block_group_decay = block_decay_mult*this->param_.block_group_decay();
+    	if(local_block_group_decay){
+			caffe_gpu_block_group_lasso(
+					net_params[param_id]->shape(0),
+					equivalent_ch,
+					ydimen, xdimen,
+					net_params[param_id]->gpu_data(),
+					temp_[param_id]->mutable_gpu_data());
+			Dtype term;
+			caffe_gpu_asum(temp_[param_id]->count(),temp_[param_id]->gpu_data(),&term);
+			term /= (xdimen*ydimen);
+			regularization_term += term*local_block_group_decay;
+
+			caffe_gpu_div_checkzero(net_params[param_id]->count(), net_params[param_id]->gpu_data(), temp_[param_id]->gpu_data(), temp_[param_id]->mutable_gpu_data());
+			caffe_gpu_axpy(net_params[param_id]->count(),
+						local_block_group_decay,
+						temp_[param_id]->gpu_data(),
+						net_params[param_id]->mutable_gpu_diff());
+    	}
+    }
+#else
+    NO_GPU;
+#endif
+    break;
+  }
+  default:
+    LOG(FATAL) << "Unknown caffe mode: " << Caffe::mode();
+  }
+
+  return regularization_term;
 }
 
 #ifndef CPU_ONLY

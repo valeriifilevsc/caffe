@@ -175,9 +175,10 @@ INCLUDE_DIRS += $(BUILD_INCLUDE_DIR) ./src ./include
 ifneq ($(CPU_ONLY), 1)
 	INCLUDE_DIRS += $(CUDA_INCLUDE_DIR)
 	LIBRARY_DIRS += $(CUDA_LIB_DIR)
-	LIBRARIES := cudart cublas curand
+	LIBRARIES := cudart cublas curand cusparse
 endif
 
+#LIBRARIES += glog gflags protobuf boost_system boost_filesystem m hdf5_hl nvToolsExt gomp hdf5
 LIBRARIES += glog gflags protobuf boost_system boost_filesystem m hdf5_hl hdf5
 
 # handle IO dependencies
@@ -309,6 +310,8 @@ ifneq (,$(findstring clang++,$(CXX)))
 	STATIC_LINK_COMMAND := -Wl,-force_load $(STATIC_NAME)
 else ifneq (,$(findstring g++,$(CXX)))
 	STATIC_LINK_COMMAND := -Wl,--whole-archive $(STATIC_NAME) -Wl,--no-whole-archive
+else ifneq (,$(findstring icpc,$(CXX)))
+	STATIC_LINK_COMMAND := -static
 else
   # The following line must not be indented with a tab, since we are not inside a target
   $(error Cannot static link with the $(CXX) compiler)
@@ -329,6 +332,12 @@ ifeq ($(USE_CUDNN), 1)
 endif
 
 # configure IO libraries
+ifeq ($(USE_SNAPSHOT_FEATURE), 1)
+	COMMON_FLAGS += -DUSE_SNAPSHOT_FEATURE
+endif
+ifeq ($(USE_PROFILE_DISPLAY), 1)
+	COMMON_FLAGS += -DUSE_PROFILE_DISPLAY
+endif
 ifeq ($(USE_OPENCV), 1)
 	COMMON_FLAGS += -DUSE_OPENCV
 endif
@@ -351,7 +360,10 @@ ifeq ($(CPU_ONLY), 1)
 	TEST_FILTER := --gtest_filter="-*GPU*"
 	COMMON_FLAGS += -DCPU_ONLY
 endif
-
+# Profiler
+ifeq ($(USE_NVTX), 1)
+	COMMON_FLAGS += -DUSE_NVTX
+endif
 # Python layer support
 ifeq ($(WITH_PYTHON_LAYER), 1)
 	COMMON_FLAGS += -DWITH_PYTHON_LAYER
@@ -402,6 +414,9 @@ LIBRARY_DIRS += $(LIB_BUILD_DIR)
 
 # Automatic dependency generation (nvcc is handled separately)
 CXXFLAGS += -MMD -MP
+
+#openmp
+#CXXFLAGS += -fopenmp
 
 # Complete build flags.
 COMMON_FLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
