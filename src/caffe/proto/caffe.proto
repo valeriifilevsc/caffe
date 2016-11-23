@@ -424,6 +424,7 @@ message LayerParameter {
   optional LRNParameter lrn_param = 118;
   optional MemoryDataParameter memory_data_param = 119;
   optional MVNParameter mvn_param = 120;
+  optional NormalizeParameter norm_param = 149;
   optional ParameterParameter parameter_param = 145;
   optional PoolingParameter pooling_param = 121;
   optional PowerParameter power_param = 122;
@@ -441,6 +442,7 @@ message LayerParameter {
   optional TanHParameter tanh_param = 127;
   optional ThresholdParameter threshold_param = 128;
   optional TileParameter tile_param = 138;
+  optional UnPoolingParameter unpooling_param = 150;
   optional WindowDataParameter window_data_param = 129;
 }
 
@@ -942,6 +944,19 @@ message MVNParameter {
   optional float eps = 3 [default = 1e-9];
 }
 
+// Message that stores parameters used by NormalizeLayer
+message NormalizeParameter {
+  optional bool across_spatial = 1 [default = true];
+  // Initial value of scale. Default is 1.0 for all
+  optional FillerParameter scale_filler = 2;
+  // Whether or not scale parameters are shared across channels.
+  optional bool channel_shared = 3 [default = true];
+  // Whether we learn the scale parameter or fix it
+  optional bool fix_scale = 4 [default = true];
+  // Epsilon for not dividing by zero while normalizing variance
+  optional float eps = 5 [default = 1e-10];
+}
+
 message ParameterParameter {
   optional BlobShape shape = 1;
 }
@@ -1217,6 +1232,27 @@ message TileParameter {
 // Message that stores parameters used by ThresholdLayer
 message ThresholdParameter {
   optional float threshold = 1 [default = 0]; // Strictly positive values
+}
+
+// Message that stores parameters used by UnPoolingLayer
+message UnPoolingParameter {
+  enum UnPoolMethod {
+    FIXED = 0;  // Put in the middle of a kernel
+    DIV = 1;    // Divide equally through a kernel
+    REP = 2;    // Repeat through a kernel
+  }
+  optional UnPoolMethod unpool = 1 [default = FIXED]; // The unpooling method
+  // Pad, kernel size, and stride are all given as a single value for equal
+  // dimensions in height and width or as Y, X pairs.
+  optional uint32 out_pad = 4 [default = 0]; // The padding size (equal in Y, X)
+  optional uint32 out_pad_h = 9 [default = 0]; // The padding height
+  optional uint32 out_pad_w = 10 [default = 0]; // The padding width
+  optional uint32 out_kernel_size = 2; // The kernel size (square)
+  optional uint32 out_kernel_h = 5; // The kernel height
+  optional uint32 out_kernel_w = 6; // The kernel width
+  optional uint32 out_stride = 3 [default = 1]; // The stride (equal in Y, X)
+  optional uint32 out_stride_h = 7; // The stride height
+  optional uint32 out_stride_w = 8; // The stride width
 }
 
 message WindowDataParameter {
