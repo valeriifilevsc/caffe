@@ -9,7 +9,7 @@ namespace caffe {
     template <typename Dtype>
     void InnerProductQLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                                                const vector<Blob<Dtype>*>& top) {
-        batch_size = this->layer_param_.inner_product_q_param().num_output();
+        num_output = this->layer_param_.inner_product_q_param().num_output();
         const int axis = bottom[0]->CanonicalAxisIndex(this->layer_param_.inner_product_q_param().axis());
         num_input = bottom[0]->count(axis);
         // Check if we need to set up the weights
@@ -28,10 +28,10 @@ namespace caffe {
         const int new_K = bottom[0]->count(axis);
         CHECK_EQ(num_input, new_K)
             << "Input size incompatible with inner product parameters.";
-        num_output = bottom[0]->count(0, axis);
+        batch_size = bottom[0]->count(0, axis);
         vector<int> top_shape = bottom[0]->shape();
         top_shape.resize(2);
-        top_shape[axis] = batch_size;
+        top_shape[axis] = num_output;
         top[0]->Reshape(top_shape);
 
         vector<int> bias_shape(1, num_input);
@@ -42,42 +42,41 @@ namespace caffe {
     template <typename Dtype>
     void InnerProductQLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
                                                 const vector<Blob<Dtype>*>& top) {
-        const int K = this->layer_param_.inner_product_q_param().K();
+        const int K = this->layer_param_.inner_product_q_param().k();
         const int BITS = static_cast<int>(log2(K));
         const int TOTAL_BITS = 8;
         const int REST_BITS = TOTAL_BITS - BITS;
-        const int M = this->layer_param_.inner_product_q_param().M();
+        const int M = this->layer_param_.inner_product_q_param().m();
 
         Dtype* bottom_data = bottom[0]->mutable_cpu_data();
         Dtype* top_data = top[0]->mutable_cpu_data();
         Dtype* D = this->blobs_[0]->mutable_cpu_data();
         const Dtype* bias = this->blobs_[1]->cpu_data();
-        const unsigned char* B_data = static_cast<unsigned char*>(this->blobs_[2]->cpu_data());
-        int* B = new int[num_output];
-        for (int i = 0, total_bit_shift = 0; i < num_output; ++i, total_bit_shift += BITS) {
+        unsigned char* B_data = (unsigned char*)(this->blobs_[2]->cpu_data());
+        int* B = new int[num_output * num_input / M];
+        for (int i = 0, total_bit_shift = 0; i < num_output * num_input / M; ++i, total_bit_shift += BITS) {
             int byte_shift = total_bit_shift / TOTAL_BITS;
             int bit_shift = total_bit_shift % TOTAL_BITS;
             int shift = REST_BITS - bit_shift;
-            B[i] = static_cast<>((shift < 0 ? B_data[byte_shift] << -shift | B_data[byte_shift + 1] >> (TOTAL_BITS + shift) :
+            B[i] = static_cast<int>((shift < 0 ? B_data[byte_shift] << -shift | B_data[byte_shift + 1] >> (TOTAL_BITS + shift) :
                                               B_data[byte_shift] >> shift) & (K - 1));
         }
         for (int i = 0; i < batch_size; ++i) {
             caffe_set(num_output, Dtype(0), top_data + i * num_output);
-            for (int j = 0; j < num_output / M; ++j) {
+            for (int j = 0; j < num_input / M; ++j) {
                 Dtype *S = bottom_data + i * num_input + j * M;
                 Dtype *d = D + K * M * j;
                 Dtype *output = new Dtype[K];
-                caffe_cpu_gemv(CblasTrans, K, M, (Dtype) 1., d, S, (Dtype) 1., output);
+                caffe_cpu_gemv(CblasTrans, K, M, (Dtype) 1., d, S, (Dtype) 0., output);
                 for (int l = 0; l < num_output; ++l) {
-                    top_data[i * num_output + l] += output[B[l]];
+                    top_data[i * num_output + l] += output[B[j * num_output + l]];
                 }
                 delete[] output;
             }
         }
         delete[] B;
-        caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_input, num_output, 1, (Dtype)1.,
-                              bias_multiplier_.cpu_data(),
-                              this->blobs_[1]->cpu_data(), (Dtype)1., top_data);
+        //caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_input, num_output, 1, (Dtype)1.,
+        //                      bias_multiplier_.cpu_data(), bias, (Dtype)1., top_data);
 
     }
 
@@ -126,10 +125,10 @@ namespace caffe {
     }
 
 #ifdef CPU_ONLY
-    STUB_GPU(InnerProductLayer);
+    STUB_GPU(InnerProductQLayer);
 #endif
 
-    INSTANTIATE_CLASS(InnerProductLayer);
-    REGISTER_LAYER_CLASS(InnerProduct);
+    INSTANTIATE_CLASS(InnerProductQLayer);
+    REGISTER_LAYER_CLASS(InnerProductQ);
 
 }  // namespace caffe

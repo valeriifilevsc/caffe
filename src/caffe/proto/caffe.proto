@@ -381,6 +381,7 @@ message LayerParameter {
   optional ImageDataParameter image_data_param = 115;
   optional InfogainLossParameter infogain_loss_param = 116;
   optional InnerProductParameter inner_product_param = 117;
+  optional InnerProductQParameter inner_product_q_param = 148;
   optional InputParameter input_param = 143;
   optional LogParameter log_param = 134;
   optional LRNParameter lrn_param = 118;
@@ -830,6 +831,13 @@ message InnerProductParameter {
   optional bool transpose = 6 [default = false];
 }
 
+message InnerProductQParameter {
+  optional uint32 num_output = 1;
+  optional uint32 k = 2 [default = 32];
+  optional uint32 m = 3 [default = 4];
+  optional uint32 axis = 4 [default = 1];
+}
+
 message InputParameter {
   // This layer produces N >= 1 top blob(s) to be assigned manually.
   // Define N shapes to set a shape for each top.
@@ -1242,6 +1250,7 @@ message V1LayerParameter {
     IMAGE_DATA = 12;
     INFOGAIN_LOSS = 13;
     INNER_PRODUCT = 14;
+    INNER_PRODUCT_Q = 40;
     LRN = 15;
     MEMORY_DATA = 29;
     MULTINOMIAL_LOGISTIC_LOSS = 16;
@@ -1287,6 +1296,7 @@ message V1LayerParameter {
   optional ImageDataParameter image_data_param = 15;
   optional InfogainLossParameter infogain_loss_param = 16;
   optional InnerProductParameter inner_product_param = 17;
+  optional InnerProductQParameter inner_product_q_param = 43;
   optional LRNParameter lrn_param = 18;
   optional MemoryDataParameter memory_data_param = 22;
   optional MVNParameter mvn_param = 34;
