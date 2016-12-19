@@ -29,7 +29,6 @@ protected:
             D_->mutable_cpu_data()[2 * i] = Dtype(i / 2 + i % 2);
             D_->mutable_cpu_data()[2 * i + 1] = Dtype(i / 2 + i % 2 + 2);
         }
-        caffe_set(5, Dtype(1), bias_->mutable_cpu_data());
         blob_bottom_vec_.push_back(blob_bottom_);
         blob_top_vec_.push_back(blob_top_);
     }
