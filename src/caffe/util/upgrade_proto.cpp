@@ -919,6 +919,8 @@ const char* UpgradeV1LayerType(const V1LayerParameter_LayerType type) {
     return "InfogainLoss";
   case V1LayerParameter_LayerType_INNER_PRODUCT:
     return "InnerProduct";
+  case V1LayerParameter_LayerType_INNER_PRODUCT_Q:
+    return "InnerProductQ";
   case V1LayerParameter_LayerType_LRN:
     return "LRN";
   case V1LayerParameter_LayerType_MEMORY_DATA:

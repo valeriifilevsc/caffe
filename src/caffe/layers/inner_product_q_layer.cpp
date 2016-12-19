@@ -9,6 +9,10 @@ namespace caffe {
     template <typename Dtype>
     void InnerProductQLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
                                                const vector<Blob<Dtype>*>& top) {
+        const int K = this->layer_param_.inner_product_q_param().k();
+        const int M = this->layer_param_.inner_product_q_param().m();
+        const int BITS = (int)log2(K);
+        const int TOTAL_BITS = 8;
         num_output = this->layer_param_.inner_product_q_param().num_output();
         const int axis = bottom[0]->CanonicalAxisIndex(this->layer_param_.inner_product_q_param().axis());
         num_input = bottom[0]->count(axis);
@@ -16,7 +20,19 @@ namespace caffe {
         if (this->blobs_.size() > 0) {
             LOG(INFO) << "Skipping parameter initialization";
         }
-        //this->param_propagate_down_.resize(this->blobs_.size(), true);
+        else {
+            this->blobs_.resize(3);
+            vector<int> d_shape(2);
+            d_shape[0] = num_input;
+            d_shape[1] = K;
+            this->blobs_[0].reset(new Blob<Dtype>(d_shape));
+            vector<int> bias_shape(1, num_output);
+            this->blobs_[1].reset(new Blob<Dtype>(bias_shape));
+            int b_shape_size = num_output * num_input / M;
+            vector<int> b_shape(1, BITS * b_shape_size / (TOTAL_BITS * sizeof(Dtype)) + BITS * b_shape_size % (TOTAL_BITS * sizeof(Dtype)));
+            this->blobs_[2].reset(new Blob<Dtype>(b_shape));
+        }
+        this->param_propagate_down_.resize(this->blobs_.size(), true);
     }
 
     template <typename Dtype>
@@ -42,42 +58,58 @@ namespace caffe {
     template <typename Dtype>
     void InnerProductQLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
                                                 const vector<Blob<Dtype>*>& top) {
+        // number of columns in the reduced weights matrix
         const int K = this->layer_param_.inner_product_q_param().k();
-        const int BITS = static_cast<int>(log2(K));
-        const int TOTAL_BITS = 8;
+        // bits per number in B hash
+        const int BITS = log2(K);
+        const int TOTAL_BITS = 32;
         const int REST_BITS = TOTAL_BITS - BITS;
+        // number of lines in the slices of the source matrix
         const int M = this->layer_param_.inner_product_q_param().m();
 
-        Dtype* bottom_data = bottom[0]->mutable_cpu_data();
+        // input image batch
+        const Dtype* bottom_data = bottom[0]->cpu_data();
+        // output image batch
         Dtype* top_data = top[0]->mutable_cpu_data();
-        Dtype* D = this->blobs_[0]->mutable_cpu_data();
+        // reduced weights matrix
+        const Dtype* D = this->blobs_[0]->cpu_data();
+        // free member weights
         const Dtype* bias = this->blobs_[1]->cpu_data();
-        unsigned char* B_data = (unsigned char*)(this->blobs_[2]->cpu_data());
+        // hash with indexes of D columns, each number uses log2(K) bits
+        int* B_hash = (int*)(this->blobs_[2]->cpu_data());
+        // D columns indexes unpacked from hash
         int* B = new int[num_output * num_input / M];
         for (int i = 0, total_bit_shift = 0; i < num_output * num_input / M; ++i, total_bit_shift += BITS) {
             int byte_shift = total_bit_shift / TOTAL_BITS;
             int bit_shift = total_bit_shift % TOTAL_BITS;
             int shift = REST_BITS - bit_shift;
-            B[i] = static_cast<int>((shift < 0 ? B_data[byte_shift] << -shift | B_data[byte_shift + 1] >> (TOTAL_BITS + shift) :
-                                              B_data[byte_shift] >> shift) & (K - 1));
+            B[i] = (int)((shift < 0 ? B_hash[byte_shift] << -shift | B_hash[byte_shift + 1] >> (TOTAL_BITS + shift) :
+                                      B_hash[byte_shift] >> shift) & (K - 1));
         }
+
+        // result of the multiplication of a slice of the source matrix on a D slice
+        Dtype *output = new Dtype[K];
+        caffe_set(K, Dtype(0), output);
+        // the most time-consuming part of code
         for (int i = 0; i < batch_size; ++i) {
             caffe_set(num_output, Dtype(0), top_data + i * num_output);
             for (int j = 0; j < num_input / M; ++j) {
-                Dtype *S = bottom_data + i * num_input + j * M;
-                Dtype *d = D + K * M * j;
-                Dtype *output = new Dtype[K];
-                caffe_cpu_gemv(CblasTrans, K, M, (Dtype) 1., d, S, (Dtype) 0., output);
+                // subvector of the source image vector
+                const Dtype *s = bottom_data + i * num_input + j * M;
+                // submatrix of the reduced weights matrix
+                const Dtype *d = D + K * M * j;
+                // multiplies vector on matrix
+                caffe_cpu_gemv(CblasTrans, M, K, (Dtype)1., d, s, (Dtype)0., output);
                 for (int l = 0; l < num_output; ++l) {
                     top_data[i * num_output + l] += output[B[j * num_output + l]];
                 }
-                delete[] output;
             }
         }
+        delete[] output;
         delete[] B;
-        //caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num_input, num_output, 1, (Dtype)1.,
-        //                      bias_multiplier_.cpu_data(), bias, (Dtype)1., top_data);
-
+        // adds bias to the resulting matrix
+        caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, batch_size, num_output, 1, (Dtype)1.,
+                              bias_multiplier_.cpu_data(), bias, (Dtype)1., top_data);
     }
 
     template <typename Dtype>
