@@ -55,6 +55,8 @@ DEFINE_string(sigint_effect, "stop",
 DEFINE_string(sighup_effect, "snapshot",
              "Optional; action to take when a SIGHUP signal is received: "
              "snapshot, stop or none.");
+DEFINE_int32(print_time, 0,
+    "Optional; print information about time consuming");
 
 // A simple registry for caffe commands.
 typedef int (*BrewFunction)();
@@ -307,28 +309,27 @@ int test() {
         } else {
           test_score[idx] += score;
         }
-        //const std::string& output_name = caffe_net.blob_names()[
-        //   caffe_net.output_blob_indices()[j]];
-        //LOG(INFO) << "Batch " << i << ", " << output_name << " = " << score;
+        const std::string& output_name = caffe_net.blob_names()[caffe_net.output_blob_indices()[j]];
+        LOG(INFO) << "Batch " << i << ", " << output_name << " = " << score;
       }
     }
-    caffe_net.PrintTestTime();
+    if (FLAGS_print_time) {
+        caffe_net.PrintTestTime();
+    }
     LOG(INFO) << "Total forwarding time: " << caffe_net.GetTotalTime()/1000 << " ms";
   }
   loss /= FLAGS_iterations;
   LOG(INFO) << "Loss: " << loss;
   for (int i = 0; i < test_score.size(); ++i) {
-    //const std::string& output_name = caffe_net.blob_names()[
-    //    caffe_net.output_blob_indices()[test_score_output_id[i]]];
-    const float loss_weight = caffe_net.blob_loss_weights()[
-        caffe_net.output_blob_indices()[test_score_output_id[i]]];
+    const std::string& output_name = caffe_net.blob_names()[caffe_net.output_blob_indices()[test_score_output_id[i]]];
+    const float loss_weight = caffe_net.blob_loss_weights()[caffe_net.output_blob_indices()[test_score_output_id[i]]];
     std::ostringstream loss_msg_stream;
     const float mean_score = test_score[i] / FLAGS_iterations;
     if (loss_weight) {
       loss_msg_stream << " (* " << loss_weight
                       << " = " << loss_weight * mean_score << " loss)";
     }
-    //LOG(INFO) << output_name << " = " << mean_score << loss_msg_stream.str();
+    LOG(INFO) << output_name << " = " << mean_score << loss_msg_stream.str();
   }
 
   return 0;

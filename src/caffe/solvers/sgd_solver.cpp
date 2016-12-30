@@ -117,7 +117,8 @@ void SGDSolver<Dtype>::ApplyUpdate() {
 		//if(local_decay) sparsity_msg_stream << GetSparsity(param_id) <<"\t";
 		//else sparsity_msg_stream << -1 <<"\t";
 	}
-	LOG(INFO) << sparsity_msg_stream.str();
+	if (this->param_.print_sparsity())
+		LOG(INFO) << sparsity_msg_stream.str();
 
 	sparsity_msg_stream.str("");
 	sparsity_msg_stream << "     Column Sparsity %: \n";
@@ -127,7 +128,8 @@ void SGDSolver<Dtype>::ApplyUpdate() {
 		//if(local_decay) sparsity_msg_stream << GetGroupSparsity(param_id, true) <<"\t";
 		//else sparsity_msg_stream << -1 <<"\t";
 	}
-	LOG(INFO) << sparsity_msg_stream.str();
+	if (this->param_.print_sparsity())
+		LOG(INFO) << sparsity_msg_stream.str();
 
 	sparsity_msg_stream.str("");
 	sparsity_msg_stream << "        Row Sparsity %: \n";
@@ -136,7 +138,8 @@ void SGDSolver<Dtype>::ApplyUpdate() {
 		//if(local_decay) sparsity_msg_stream << GetGroupSparsity(param_id, false) <<"\t";
 		//else sparsity_msg_stream << -1 <<"\t";
 	}
-	LOG(INFO) << sparsity_msg_stream.str();
+	if (this->param_.print_sparsity())
+		LOG(INFO) << sparsity_msg_stream.str();
 
 	sparsity_msg_stream.str("");
 	sparsity_msg_stream << "      Block Sparsity %: \n";
@@ -150,7 +153,8 @@ void SGDSolver<Dtype>::ApplyUpdate() {
 		}
 		sparsity_msg_stream << "\t";
 	}
-	LOG(INFO) << sparsity_msg_stream.str();
+	if (this->param_.print_sparsity())
+		LOG(INFO) << sparsity_msg_stream.str();
 
   }
 
