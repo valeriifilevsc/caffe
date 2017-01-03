@@ -78,16 +78,92 @@ namespace caffe {
         // hash with indexes of D columns, each number uses log2(K) bits
         int* B_hash = (int*)(this->blobs_[2]->cpu_data());
         // D columns indexes unpacked from hash
-        int* B = new int[num_output * num_input / M];
+        unsigned char* B = new unsigned char[num_output * num_input / M];
         for (int i = 0, total_bit_shift = 0; i < num_output * num_input / M; ++i, total_bit_shift += BITS) {
             int byte_shift = total_bit_shift / TOTAL_BITS;
             int bit_shift = total_bit_shift % TOTAL_BITS;
             int shift = REST_BITS - bit_shift;
-            B[i] = (int)((shift < 0 ? B_hash[byte_shift] << -shift | B_hash[byte_shift + 1] >> (TOTAL_BITS + shift) :
+            B[i] = (unsigned char)((shift < 0 ? B_hash[byte_shift] << -shift | B_hash[byte_shift + 1] >> (TOTAL_BITS + shift) :
                                       B_hash[byte_shift] >> shift) & (K - 1));
         }
 
         // result of the multiplication of a slice of the source matrix on a D slice
+	
+#define BATCHING
+//#define INNER_CLOCK
+
+#ifdef BATCHING
+	Dtype *batched_input = new Dtype[batch_size * M];
+	caffe_set(batch_size * M, Dtype(0), batched_input);
+	Dtype *batched_output = new Dtype[batch_size * K];
+	Dtype *new_d = new Dtype[M * K];
+#ifdef INNER_CLOCK
+	time_t sum_transp = 0;
+	time_t sum_mult = 0;
+	time_t sum_batch = 0;
+	time_t sum_add = 0;
+#endif
+
+	volatile Dtype not_optimized = 0.0;
+	for (int j = 0; j < num_input; j += M) {
+#ifdef INNER_CLOCK
+	    time_t cur_t = clock();
+	    time_t prev_t;
+#endif
+	    for (int i = 0; i < batch_size; ++i) {
+	        for (int l = 0; l < M; ++l) {
+		    batched_input[i * M + l] = bottom_data[i * num_input + j + l];
+		}
+	    }
+#ifdef INNER_CLOCK
+	    prev_t = cur_t;
+	    cur_t=clock();
+	    sum_batch += cur_t - prev_t;
+#endif
+	    const Dtype *d = D + K * j;
+	    for (int i = 0; i < K; ++i) {
+	        for (int j = 0; j < M; ++j) {
+		    new_d[i * M + j] = d[j * K + i];
+	        }
+	    }
+#ifdef INNER_CLOCK
+	    prev_t = cur_t;
+	    cur_t=clock();
+	    sum_transp += cur_t - prev_t;
+#endif
+	    caffe_cpu_gemm(CblasNoTrans, CblasTrans, 
+			    batch_size, M, K,
+			    (Dtype)1., batched_input,new_d, (Dtype)0., batched_output);
+#ifdef INNER_CLOCK
+	    prev_t = cur_t;
+	    cur_t=clock();
+	    sum_mult += cur_t - prev_t;
+#endif
+	    const int j_shift = j / M * num_output;
+	    //not_optimized += B[j_shift];
+	    for (int i = 0; i < batch_size; ++i) {
+		const int i_shift = i * num_output;
+		const int i_k_shift = K * i;
+		not_optimized += batched_output[i_k_shift];
+		for (int l = 0; l < num_output; ++l) {
+		    top_data[i_shift + l] += batched_output[i_k_shift + B[j_shift + l]];
+		}
+	    }
+#ifdef INNER_CLOCK
+	    prev_t = cur_t;
+	    cur_t=clock();
+	    sum_add += cur_t - prev_t;
+#endif
+	}
+#ifdef INNER_CLOCK
+	LOG(ERROR) << "TRANSPOSE: " << 1000.0 * sum_transp / CLOCKS_PER_SEC; 
+	LOG(ERROR) << " MULTIPLY: " << 1000.0 * sum_mult / CLOCKS_PER_SEC; 
+	LOG(ERROR) << " BATCHING: " << 1000.0 * sum_batch / CLOCKS_PER_SEC; 
+	LOG(ERROR) << " ADDITION: " << 1000.0 * sum_add / CLOCKS_PER_SEC << "\n";
+#endif	
+	delete[] batched_input;
+	delete[] batched_output;
+#else //BATCHING
         Dtype *output = new Dtype[K];
         caffe_set(K, Dtype(0), output);
         // the most time-consuming part of code
@@ -100,12 +176,14 @@ namespace caffe {
                 const Dtype *d = D + K * M * j;
                 // multiplies vector on matrix
                 caffe_cpu_gemv(CblasTrans, M, K, (Dtype)1., d, s, (Dtype)0., output);
+
                 for (int l = 0; l < num_output; ++l) {
                     top_data[i * num_output + l] += output[B[j * num_output + l]];
                 }
             }
         }
         delete[] output;
+#endif //BATCHING
         delete[] B;
         // adds bias to the resulting matrix
         caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, batch_size, num_output, 1, (Dtype)1.,

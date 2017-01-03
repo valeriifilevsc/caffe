@@ -40,7 +40,7 @@ void InnerProductQLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
         cudaMalloc((void**)&Bgpu, Bsize);
         cudaMemcpy(Bgpu, B, Bsize, cudaMemcpyHostToDevice);
 
-        for (int i = 0; i < batch_size; ++i) {
+        /*for (int i = 0; i < batch_size; ++i) {
             caffe_gpu_set<Dtype>(num_output, Dtype(0), top_data + i * num_output);
             for (int j = 0; j < num_input / M; ++j) {
                 Dtype *S = bottom_data + i * num_input + j * M;
@@ -55,7 +55,7 @@ void InnerProductQLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
                 cudaFree(output);
                 cudaFree(output2);
             }
-        }
+        }*/
         cudaFree(Bgpu);
         delete[] B;
         caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, batch_size, num_output, 1, (Dtype)1.,
