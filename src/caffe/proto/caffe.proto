@@ -638,6 +638,7 @@ message ConvolutionParameter {
     DEFAULT = 0;
     CAFFE = 1;
     CUDNN = 2;
+    QUANT = 3;
   }
   optional Engine engine = 15 [default = DEFAULT];
   //repeated uint32 forward_channels = 19; // the name of each bottom blob
@@ -670,6 +671,9 @@ message ConvolutionParameter {
     DIRECT_DCONV = 4;  //direct convolution on tensors without lowering, dense format. More in intel branch
   }
   optional ConvMode conv_mode = 21 [default = LOWERED_GEMM];
+
+  optional uint32 k = 22 [default = 32];
+  optional uint32 m = 23 [default = 4];
 }
 
 message CropParameter {
