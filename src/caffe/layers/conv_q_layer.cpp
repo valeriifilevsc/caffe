@@ -31,11 +31,12 @@ namespace caffe {
 			this->blobs_[0].reset(new Blob<Dtype>(d_shape));
 			vector<int> b_binary_shape(1, BITS * b_shape_size / (8 * sizeof(Dtype)) + (BITS * b_shape_size % (8 * sizeof(Dtype)) ? 1 : 0));
 			this->blobs_[2].reset(new Blob<Dtype>(b_binary_shape));
-
-			vector<int> b_shape(1, b_shape_size);
-			B_.Reshape(b_shape);
 		}
 		else {
+			if (B_.count() == 0) {
+				vector<int> b_shape(1, b_shape_size);
+				B_.Reshape(b_shape);
+			}
 			int* B_hash = (int*)(this->blobs_[2]->cpu_data());
 			int* B = B_.mutable_cpu_data();
 			for (int i = 0, total_bit_shift = 0; i < b_shape_size; ++i, total_bit_shift += BITS) {
