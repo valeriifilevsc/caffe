@@ -36,11 +36,19 @@ else:
     weights = net.params[args.layer][0].data
     # TODO: D calculation doesn't need to depend from fc or conv type
     is_fc = False
+    paramsId = 0
+    for i in xrange(len(net_params.layer)):
+        if net_params.layer[i].name == args.layer:
+            paramsId = i
+            break
+
     for i in xrange(len(net._layer_names)):
         if net._layer_names[i] == args.layer:
-            layer = net_params.layers[i]
-            layer.ClearField('blobs_lr')
-            layer.ClearField('weight_decay')
+            print(net._layer_names[i], args.layer)
+            print(net_params.layer[paramsId])
+            layer = net_params.layer[paramsId]
+            #layer.ClearField('blobs_lr')
+            #layer.ClearField('weight_decay')
             if net.layers[i].type == 'Convolution':
                 in_channels = weights.shape[1]
                 weights = weights.transpose((0, 2, 3, 1)).reshape((-1, in_channels))
