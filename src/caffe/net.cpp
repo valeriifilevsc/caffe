@@ -24,16 +24,13 @@
 namespace caffe {
 
 template <typename Dtype>
-Net<Dtype>::Net(const NetParameter& param, const Net* root_net)
-    : root_net_(root_net) {
+Net<Dtype>::Net(const NetParameter& param) {
   Init(param);
 }
 
 template <typename Dtype>
 Net<Dtype>::Net(const string& param_file, Phase phase,
-    const int level, const vector<string>* stages,
-    const Net* root_net)
-    : root_net_(root_net) {
+    const int level, const vector<string>* stages) {
   NetParameter param;
   ReadNetParamsFromTextFileOrDie(param_file, &param);
   // Set phase, stages and level
@@ -50,8 +47,6 @@ Net<Dtype>::Net(const string& param_file, Phase phase,
 template <typename Dtype>
 void Net<Dtype>::Init(const NetParameter& in_param) {
   total_time_ = 0;
-  CHECK(Caffe::root_solver() || root_net_)
-      << "root_net_ needs to be set for all non-root solvers";
   // Set phase from the state.
   phase_ = in_param.state().phase();
   // Filter layers based on their include/exclude rules and
@@ -77,9 +72,6 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   top_id_vecs_.resize(param.layer_size());
   bottom_need_backward_.resize(param.layer_size());
   for (int layer_id = 0; layer_id < param.layer_size(); ++layer_id) {
-    // For non-root solvers, whether this layer is shared from root_net_.
-    bool share_from_root = !Caffe::root_solver()
-        && root_net_->layers_[layer_id]->ShareInParallel();
     // Inherit phase from net if unset.
     if (!param.layer(layer_id).has_phase()) {
       param.mutable_layer(layer_id)->set_phase(phase_);
@@ -92,13 +84,7 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
           << "propagate_down param must be specified "
           << "either 0 or bottom_size times ";
     }
-    if (share_from_root) {
-      LOG(INFO) << "Sharing layer " << layer_param.name() << " from root net";
-      layers_.push_back(root_net_->layers_[layer_id]);
-      layers_[layer_id]->SetShared(true);
-    } else {
-      layers_.push_back(LayerRegistry<Dtype>::CreateLayer(layer_param));
-    }
+    layers_.push_back(LayerRegistry<Dtype>::CreateLayer(layer_param));
     layer_names_.push_back(layer_param.name());
     LOG_IF(INFO, Caffe::root_solver())
         << "Creating Layer " << layer_param.name();
@@ -137,19 +123,7 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
       }
     }
     // After this layer is connected, set it up.
-    if (share_from_root) {
-      // Set up size of top blobs using root_net_
-      const vector<Blob<Dtype>*>& base_top = root_net_->top_vecs_[layer_id];
-      const vector<Blob<Dtype>*>& this_top = this->top_vecs_[layer_id];
-      for (int top_id = 0; top_id < base_top.size(); ++top_id) {
-        this_top[top_id]->ReshapeLike(*base_top[top_id]);
-        LOG(INFO) << "Created top blob " << top_id << " (shape: "
-            << this_top[top_id]->shape_string() <<  ") for shared layer "
-            << layer_param.name();
-      }
-    } else {
-      layers_[layer_id]->SetUp(bottom_vecs_[layer_id], top_vecs_[layer_id]);
-    }
+    layers_[layer_id]->SetUp(bottom_vecs_[layer_id], top_vecs_[layer_id]);
     LOG_IF(INFO, Caffe::root_solver())
         << "Setting up " << layer_names_[layer_id];
     for (int top_id = 0; top_id < top_vecs_[layer_id].size(); ++top_id) {
@@ -646,6 +620,9 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
 //	if(layers_[i]->layer_param().type()=="Pooling"){
 //		cudaProfilerStart();
 //	}
+    for (int c = 0; c < before_forward_.size(); ++c) {
+      before_forward_[c]->run(i);
+    }
     Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
 //    if(layers_[i]->layer_param().type()=="Pooling"){
 //    	cudaProfilerStop();
@@ -658,30 +635,15 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
     //layers_[i]->SetTestTime( layers_[i]->GetTestTime() + timer.MicroSeconds() );
     loss += layer_loss;
     if (debug_info_) { ForwardDebugInfo(i); }
+    for (int c = 0; c < after_forward_.size(); ++c) {
+      after_forward_[c]->run(i);
+    }
   }
   //LOG(INFO) << "Total time in this iteration: " << "\t("<<cur_time_total<<" us)";
   //total_time_ += cur_time_total;
   return loss;
 }
 
-
-template <typename Dtype>
-void Net<Dtype>::PrintTestTime(){
-	double total = GetTotalTime();
-	for (int i = 0; i <=layers_.size() - 1; ++i) {
-	    LOG(INFO) << " Test time of " << layer_names_[i]
-	              << "\t"<< (layers_[i]->GetTestTime()/1000)<< " ms ( "<< (100*layers_[i]->GetTestTime()/total) <<" % )";
-	}
-}
-
-template <typename Dtype>
-double Net<Dtype>::GetTotalTime(){
-	double total = 0;
-	for (int i = 0; i <=layers_.size() - 1; ++i) {
-		total += layers_[i]->GetTestTime();
-	}
-	return total;
-}
 
 template <typename Dtype>
 Dtype Net<Dtype>::ForwardFrom(int start) {
@@ -725,10 +687,16 @@ void Net<Dtype>::BackwardFromTo(int start, int end) {
   CHECK_GE(end, 0);
   CHECK_LT(start, layers_.size());
   for (int i = start; i >= end; --i) {
+    for (int c = 0; c < before_backward_.size(); ++c) {
+      before_backward_[c]->run(i);
+    }
     if (layer_need_backward_[i]) {
       layers_[i]->Backward(
           top_vecs_[i], bottom_need_backward_[i], bottom_vecs_[i]);
       if (debug_info_) { BackwardDebugInfo(i); }
+    }
+    for (int c = 0; c < after_backward_.size(); ++c) {
+      after_backward_[c]->run(i);
     }
   }
 }
