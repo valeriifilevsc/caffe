@@ -2,7 +2,11 @@
 #include <boost/random.hpp>
 
 #include <limits>
+
+#ifdef OPEN_MP
 #include <omp.h>
+#endif
+
 #include "caffe/common.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/rng.hpp"

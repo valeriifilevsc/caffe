@@ -38,8 +38,8 @@ class Net {
   const vector<Blob<Dtype>*>& Forward(Dtype* loss = NULL);
   /// @brief DEPRECATED; use Forward() instead.
   const vector<Blob<Dtype>*>& ForwardPrefilled(Dtype* loss = NULL) {
-    LOG_EVERY_N(WARNING, 1000) << "DEPRECATED: ForwardPrefilled() "
-        << "will be removed in a future version. Use Forward().";
+//    LOG_EVERY_N(WARNING, 1000) << "DEPRECATED: ForwardPrefilled() "
+//        << "will be removed in a future version. Use Forward().";
     return Forward(loss);
   }
 

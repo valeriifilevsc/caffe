@@ -45,9 +45,9 @@ T BlockingQueue<T>::pop(const string& log_on_wait) {
   boost::mutex::scoped_lock lock(sync_->mutex_);
 
   while (queue_.empty()) {
-    if (!log_on_wait.empty()) {
-      LOG_EVERY_N(INFO, 1000)<< log_on_wait;
-    }
+//    if (!log_on_wait.empty()) {
+//      LOG_EVERY_N(INFO, 1000)<< log_on_wait;
+//    }
     sync_->condition_.wait(lock);
   }
 

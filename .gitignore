@@ -3,6 +3,9 @@
 #xcode
 xcuserdata/
 
+#libs
+lib/
+
 # Compiled Object files
 *.slo
 *.lo

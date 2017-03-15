@@ -4,7 +4,10 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 #include "caffe/util/device_alternate.hpp"
+
+#ifndef CPU_ONLY
 #include <cuda_profiler_api.h>
+#endif
 
 #ifdef USE_NVTX
 #include <nvToolsExt.h>
