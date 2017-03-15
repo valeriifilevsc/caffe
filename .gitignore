@@ -1,5 +1,8 @@
 ## General
 
+#xcode
+xcuserdata/
+
 # Compiled Object files
 *.slo
 *.lo
