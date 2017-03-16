@@ -503,13 +503,13 @@
 		BB2C02491E78EC28005CE046 /* gtest-all.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "gtest-all.cpp"; sourceTree = "<group>"; };
 		BB2C024A1E78EC28005CE046 /* gtest.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = gtest.h; sourceTree = "<group>"; };
 		BB2C024B1E78EC28005CE046 /* gtest_main.cc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = gtest_main.cc; sourceTree = "<group>"; };
-		BB2C02671E78ED41005CE046 /* caffe */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; name = caffe; path = /Users/valerii.filev/Looksery/MacApp/MacProject/CoreLibrary/Frameworks/caffe/build/Debug/caffe; sourceTree = "<absolute>"; };
 		BB2C37281E79D629005CE046 /* caffe.pb.cc */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = caffe.pb.cc; sourceTree = "<group>"; };
 		BB2C372B1E79D639005CE046 /* caffe.pb.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = caffe.pb.h; sourceTree = "<group>"; };
 		BB2C377A1E79ECDC005CE046 /* libprotobufArm.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libprotobufArm.a; path = lib/libprotobufArm.a; sourceTree = "<group>"; };
 		BB2C377F1E79EEA6005CE046 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
 		BB2C37811E79F031005CE046 /* libboost.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libboost.a; path = lib/libboost.a; sourceTree = "<group>"; };
 		BB2C37D61E7A34B4005CE046 /* libcaffeMacOs.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libcaffeMacOs.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB2C382C1E7A4066005CE046 /* caffe */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = caffe; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1033,6 +1033,7 @@
 				BB2C01461E78EC28005CE046 /* src */,
 				BB2C37791E79ECD9005CE046 /* Frameworks */,
 				BB2C37D61E7A34B4005CE046 /* libcaffeMacOs.a */,
+				BB2C382C1E7A4066005CE046 /* caffe */,
 			);
 			sourceTree = "<group>";
 		};
@@ -1063,7 +1064,7 @@
 			);
 			name = caffe;
 			productName = caffe;
-			productReference = BB2C02671E78ED41005CE046 /* caffe */;
+			productReference = BB2C382C1E7A4066005CE046 /* caffe */;
 			productType = "com.apple.product-type.tool";
 		};
 		BB2C37D51E7A34B4005CE046 /* caffeMacOs */ = {
@@ -1440,6 +1441,12 @@
 				EXECUTABLE_PREFIX = lib;
 				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					CPU_ONLY,
+					USE_ACCELERATE,
+					NDEBUG,
+					"$(inherited)",
+				);
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
@@ -1476,6 +1483,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					CPU_ONLY,
 					USE_ACCELERATE,
+					NDEBUG,
 				);
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/include",
@@ -1506,6 +1514,7 @@
 				BB2C37D91E7A34B4005CE046 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 		BB2CFEE41E78EAB9005CE046 /* Build configuration list for PBXProject "caffe" */ = {
 			isa = XCConfigurationList;
